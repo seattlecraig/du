@@ -6,7 +6,6 @@
  *  Date        Author          Description
  *  ====        ======          ===========
  *  06-26-25    Craig           initial implementation
- *
  */
 
 using System;
@@ -23,7 +22,6 @@ namespace DuFinal
         static bool showFiles = false;
         static bool summaryOnly = false;
         static bool useExactBytes = false;
-        static bool useColor = false;
         static bool trackInodes = false;
 
         static HashSet<string> seen = new();
@@ -33,8 +31,10 @@ namespace DuFinal
             Console.OutputEncoding = System.Text.Encoding.UTF8;
             EnableVirtualTerminal();
 
+            /*
+             * Process  Command line options
+             */
             List<string> targets = new();
-
             foreach (var arg in args)
             {
                 switch (arg)
@@ -42,7 +42,6 @@ namespace DuFinal
                     case "-a": showFiles = true; break;
                     case "-s": summaryOnly = true; break;
                     case "-x": useExactBytes = true; break;
-                    case "--color": useColor = true; break;
                     case "--track": trackInodes = true; break;
                     case "-?":
                     case "--help":
@@ -55,7 +54,13 @@ namespace DuFinal
             }
 
             if (targets.Count == 0)
+            {
                 targets.Add(Directory.GetCurrentDirectory());
+            }
+
+            /*
+             * process each target directory
+             */
 
             foreach (var target in targets)
             {
@@ -65,18 +70,33 @@ namespace DuFinal
                     continue;
                 }
 
-                long total = StreamUsage(target);
-                PrintDivider();
+                bool printedAny = false;
+                long total = StreamUsage(target, ref printedAny);
+
+                if (printedAny)
+                    Console.WriteLine(new string('-', 12));
+
                 PrintSizeLine(total, target, isTotal: true);
             }
-        }
+        } /* Main */
 
-        static long StreamUsage(string dir)
+        /*
+         * StreamUsage
+         * 
+         * Recursively calculate the size of files in a directory
+         * and its subdirectories.
+         * 
+         * Returns the total size in bytes.
+         */
+        static long StreamUsage(string dir, ref bool printedAny)
         {
             long total = 0;
 
             try
             {
+                /*
+                 * process all the files
+                 */
                 foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.TopDirectoryOnly))
                 {
                     try
@@ -86,20 +106,29 @@ namespace DuFinal
                         {
                             total += size;
                             if (showFiles && !summaryOnly)
+                            {
                                 PrintSizeLine(size, file);
+                                printedAny = true;
+                            }
                         }
                     }
                     catch { }
                 }
 
+                /*
+                 * now process all the directories
+                 */
                 foreach (var sub in Directory.EnumerateDirectories(dir, "*", SearchOption.TopDirectoryOnly))
                 {
                     try
                     {
-                        long subTotal = StreamUsage(sub);
+                        long subTotal = StreamUsage(sub, ref printedAny);
                         total += subTotal;
                         if (!summaryOnly)
+                        {
                             PrintSizeLine(subTotal, sub);
+                            printedAny = true;
+                        }
                     }
                     catch { }
                 }
@@ -107,8 +136,14 @@ namespace DuFinal
             catch { }
 
             return total;
-        }
+        } /* StreamUsage */
 
+        /*
+         * TrackFile
+         * 
+         * Track the file by its inode (file ID) to avoid double-counting.
+         * Returns true if the file is new, false if it has been seen before.
+         */
         static bool TrackFile(string path)
         {
             try
@@ -121,22 +156,31 @@ namespace DuFinal
                 return true;
             }
             catch { return true; }
-        }
 
-        static void PrintDivider() => Console.WriteLine(new string('-', 12));
+        } /* TrackFile */
 
+        /*
+         * PrintSizeLine
+         * 
+         * Print a formatted line with the size and path.
+         * Uses ANSI colors for size granularity.
+         */
         static void PrintSizeLine(long size, string path, bool isTotal = false)
         {
             string sizeStr = useExactBytes
                 ? size.ToString().PadLeft(12)
                 : FormatSize(size).PadLeft(12);
 
-            string color = useColor ? GetSizeColorGranular(size) : "";
-            string reset = useColor ? "\x1b[0m" : "";
+            string color = GetSizeColorGranular(size);
+            Console.WriteLine($"{color}{sizeStr}\x1b[0m  {path}");
+        } /* PrintSizeLine */
 
-            Console.WriteLine($"{color}{sizeStr}{reset}  {path}");
-        }
-
+        /*
+         * FormatSize
+         * 
+         * Format the size in a human-readable way (B, KB, MB, GB, TB).
+         * Returns a string representation of the size.
+         */
         static string FormatSize(long bytes)
         {
             string[] units = { "B", "KB", "MB", "GB", "TB" };
@@ -147,22 +191,31 @@ namespace DuFinal
                 size /= 1024;
                 unit++;
             }
-            return $"{size:0.##} {units[unit]}";
-        }
+            return $"{size:##,##0.##} {units[unit]}";
+        } /* FormatSize */
 
+        /*
+         * GetSizeColorGranular
+         * 
+         * different colors for different size ranges
+         */
         static string GetSizeColorGranular(long size)
         {
-            // Units in bytes
-            if (size >= 1L << 40) return "\x1b[91m"; // ≥ 1 TB (Bright Red)
-            if (size >= 100L << 30) return "\x1b[31m"; // ≥ 100 GB (Red)
-            if (size >= 10L << 30) return "\x1b[35m"; // ≥ 10 GB (Magenta)
-            if (size >= 1L << 30) return "\x1b[33m";  // ≥ 1 GB (Yellow)
-            if (size >= 100L << 20) return "\x1b[32m"; // ≥ 100 MB (Green)
-            if (size >= 10L << 20) return "\x1b[36m";  // ≥ 10 MB (Cyan)
-            if (size >= 1L << 20) return "\x1b[34m";   // ≥ 1 MB (Blue)
-            return "\x1b[2m";                          // < 1 MB (Dim)
-        }
+            if (size >= 1L << 40) return "\x1b[91m";        // ≥ 1 TB → Bright Red
+            if (size >= 100L << 30) return "\x1b[31m";       // ≥ 100 GB → Red
+            if (size >= 10L << 30) return "\x1b[35m";       // ≥ 10 GB → Magenta
+            if (size >= 1L << 30) return "\x1b[38;5;208m"; // ≥ 1 GB → Orange
+            if (size >= 100L << 20) return "\x1b[32m";       // ≥ 100 MB → Green
+            if (size >= 10L << 20) return "\x1b[36m";       // ≥ 10 MB → Cyan
+            if (size >= 1L << 20) return "\x1b[34m";       // ≥ 1 MB → Blue
+            return "\x1b[2m";                                 // < 1 MB → Dim
+        } /* GetSizeColorGranular */
 
+        /*
+         * PrintHelp
+         * 
+         * Print the help message for the du command.
+         */
         static void PrintHelp()
         {
             Console.WriteLine(@"
@@ -171,18 +224,24 @@ Options:
   -a         : include files
   -s         : summary only
   -x         : exact byte size
-  --color    : enable ANSI color output
   --track    : track inodes to avoid double-counting (slower)
   -?         : show this help
+
+Note: color is always enabled.
 ");
         }
-
+        /*
+         * GetOnDiskSize
+         * 
+         * thunk over to Win32 API to get the on-disk size of a file.
+         */
         static long GetOnDiskSize(string path)
         {
             uint lo = GetCompressedFileSizeW(path, out uint hi);
             ulong size = ((ulong)hi << 32) | lo;
             return (long)size;
-        }
+
+        } /* GetOnDiskSize */
 
         [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
         static extern uint GetCompressedFileSizeW(string lpFileName, out uint lpFileSizeHigh);
@@ -202,6 +261,13 @@ Options:
             public uint FileIndexLow;
         }
 
+
+        /*
+         * GetFileId
+         * 
+         * Thunk over to get the file ID (inode) for a file using its handle.
+         * This is used to track files and avoid double-counting.
+         */
         [DllImport("kernel32.dll", SetLastError = true)]
         static extern bool GetFileInformationByHandle(IntPtr hFile, out BY_HANDLE_FILE_INFORMATION lpFileInformation);
 
@@ -211,6 +277,12 @@ Options:
                 throw new IOException("Could not get file info.");
             return info;
         }
+
+        /*
+         * EnableVirtualTerminal
+         * 
+         * Enable virtual terminal processing for colored output in the console.
+         */
 
         static void EnableVirtualTerminal()
         {
