@@ -6,6 +6,7 @@
  *  Date        Author          Description
  *  ====        ======          ===========
  *  06-26-25    Craig           initial implementation
+ *  06-27-25    Craig           fixed it so that multiple options after the dash work
  */
 
 using System;
@@ -37,19 +38,31 @@ namespace DuFinal
             List<string> targets = new();
             foreach (var arg in args)
             {
-                switch (arg)
+                if (arg.StartsWith("--"))
                 {
-                    case "-a": showFiles = true; break;
-                    case "-s": summaryOnly = true; break;
-                    case "-x": useExactBytes = true; break;
-                    case "--track": trackInodes = true; break;
-                    case "-?":
-                    case "--help":
-                        PrintHelp();
-                        return;
-                    default:
-                        targets.Add(arg);
-                        break;
+                    if (arg == "--track") trackInodes = true;
+                    else if (arg == "--help") { PrintHelp(); return; }
+                    else targets.Add(arg); // treat as path or unknown long flag
+                }
+                else if (arg.StartsWith("-") && arg.Length > 1)
+                {
+                    foreach (var ch in arg.Skip(1))
+                    {
+                        switch (ch)
+                        {
+                            case 'a': showFiles = true; break;
+                            case 's': summaryOnly = true; break;
+                            case 'x': useExactBytes = true; break;
+                            case '?': PrintHelp(); return;
+                            default:
+                                Console.Error.WriteLine($"du: invalid option -- '{ch}'");
+                                return;
+                        }
+                    }
+                }
+                else
+                {
+                    targets.Add(arg);
                 }
             }
 
